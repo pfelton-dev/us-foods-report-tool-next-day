@@ -2,3 +2,6 @@ streamlit
 pandas
 openpyxl
 xlrd==2.0.1
+lxml
+html5lib
+beautifulsoup4

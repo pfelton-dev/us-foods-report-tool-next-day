@@ -21,10 +21,24 @@ st.write("Upload the required reports and Outlook ZIP files to generate the US F
 
 
 def read_excel_file(uploaded_file):
-    if uploaded_file.name.lower().endswith(".xls"):
-        return pd.read_excel(uploaded_file, engine="xlrd")
-    else:
-        return pd.read_excel(uploaded_file, engine="openpyxl")
+    file_bytes = uploaded_file.getvalue()
+    file_name = uploaded_file.name.lower()
+
+    # Print Logic sometimes exports .xls files as HTML tables
+    if (
+        file_bytes[:50].lower().strip().startswith(b"<html")
+        or b"<table" in file_bytes[:1000].lower()
+        or b"<tr" in file_bytes[:1000].lower()
+    ):
+        tables = pd.read_html(BytesIO(file_bytes))
+        if not tables:
+            raise ValueError("No tables found in the HTML-style Excel file.")
+        return tables[0]
+
+    if file_name.endswith(".xls"):
+        return pd.read_excel(BytesIO(file_bytes), engine="xlrd")
+
+    return pd.read_excel(BytesIO(file_bytes), engine="openpyxl")
 
 
 def normalize_po(value):
@@ -205,39 +219,19 @@ def split_sheets(df):
 
     if laminate_col:
         laminate_df = df[
-            df[laminate_col]
-            .astype(str)
-            .str.upper()
-            .str.strip()
-            == "LAMINATE"
+            df[laminate_col].astype(str).str.upper().str.strip() == "LAMINATE"
         ]
 
     if coating_col:
         uv_df = df[
-            df[coating_col]
-            .astype(str)
-            .str.upper()
-            .str.strip()
-            != "NONE"
+            df[coating_col].astype(str).str.upper().str.strip() != "NONE"
         ]
 
     if laminate_col and coating_col:
         trim_df = df[
-            (
-                df[laminate_col]
-                .astype(str)
-                .str.upper()
-                .str.strip()
-                == "NONE"
-            )
+            (df[laminate_col].astype(str).str.upper().str.strip() == "NONE")
             &
-            (
-                df[coating_col]
-                .astype(str)
-                .str.upper()
-                .str.strip()
-                == "NONE"
-            )
+            (df[coating_col].astype(str).str.upper().str.strip() == "NONE")
         ]
     else:
         trim_df = df.copy()
@@ -288,10 +282,7 @@ def format_workbook(output, cancelled_jobs):
 
             if job_col_index:
                 job_value = str(
-                    ws.cell(
-                        row=row[0].row,
-                        column=job_col_index
-                    ).value
+                    ws.cell(row=row[0].row, column=job_col_index).value
                 ).strip()
 
                 if job_value in cancelled_jobs:
@@ -299,10 +290,7 @@ def format_workbook(output, cancelled_jobs):
                         cell.fill = cancelled_fill
 
             if ship_date_col_index:
-                ship_cell = ws.cell(
-                    row=row[0].row,
-                    column=ship_date_col_index
-                )
+                ship_cell = ws.cell(row=row[0].row, column=ship_date_col_index)
                 ship_cell.number_format = "mm/dd/yy"
 
         for col in ws.columns:
@@ -369,10 +357,7 @@ if st.button("Generate Report", type="primary"):
 
     st.info("Reading Outlook ZIP/XML files...")
 
-    ship_date_lookup = build_ship_date_lookup(
-        zip_files,
-        optional_files
-    )
+    ship_date_lookup = build_ship_date_lookup(zip_files, optional_files)
 
     po_col = None
 
@@ -383,10 +368,7 @@ if st.button("Generate Report", type="primary"):
 
     if po_col:
         df["Ship Date"] = df[po_col].apply(
-            lambda x: ship_date_lookup.get(
-                normalize_po(x),
-                pd.NaT
-            )
+            lambda x: ship_date_lookup.get(normalize_po(x), pd.NaT)
         )
     else:
         df["Ship Date"] = pd.NaT
@@ -404,18 +386,11 @@ if st.button("Generate Report", type="primary"):
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for sheet_name, sheet_df in sheets.items():
-            sheet_df.to_excel(
-                writer,
-                sheet_name=sheet_name,
-                index=False
-            )
+            sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
 
     output.seek(0)
 
-    final_output = format_workbook(
-        output,
-        cancelled_jobs
-    )
+    final_output = format_workbook(output, cancelled_jobs)
 
     filename = f"US_Foods_Report_{datetime.today().strftime('%m%d%Y')}.xlsx"
 
